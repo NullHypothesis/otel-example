@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
@@ -16,45 +15,40 @@ import (
 
 var tracer trace.Tracer
 
-func newExporter(ctx context.Context) (*stdouttrace.Exporter, error) {
-	return stdouttrace.New(stdouttrace.WithPrettyPrint())
-}
-
 type TracingRoundTripper struct {
 	origTripper http.RoundTripper
 }
 
 func (t TracingRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	spanCtx, span := tracer.Start(r.Context(), "RoundTrip")
-	//span.SetAttributes(attribute.String("endpoint", r.RequestURI))
 	defer span.End()
 
+	// Propagate the span context to the server, which is also instrumented for
+	// tracing.
 	otel.GetTextMapPropagator().Inject(
 		spanCtx,
 		propagation.HeaderCarrier(r.Header),
 	)
-	//log.Printf("Fields: %v", otel.GetTextMapPropagator().Fields())
 
 	return t.origTripper.RoundTrip(r.WithContext(spanCtx))
 }
 
 func main() {
-	var (
-		tp = lib.NewTracerProvider()
-	)
+	// Both the client and the server use a tracer provider singleton to create
+	// new traces.
+	var tp = lib.NewTracerProvider("HttpClient")
 	defer tp.Shutdown(context.Background())
-	tracer = tp.Tracer("http-client")
+	tracer = tp.Tracer("")
 
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	client := http.Client{
+		// Use a RoundTripper to inject the span context into the HTTP request.
 		Transport: TracingRoundTripper{
 			origTripper: &http.Transport{},
 		},
 	}
-	resp, err := client.Get("http://localhost:5000")
-	if err != nil {
+	if _, err := client.Get("http://localhost:8080"); err != nil {
 		log.Fatalf("Error fetching page: %v", err)
 	}
-	log.Print(resp)
 }

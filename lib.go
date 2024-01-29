@@ -1,7 +1,6 @@
 package lib
 
 import (
-	"context"
 	"log"
 
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
@@ -11,28 +10,34 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
 
-func newExporter(ctx context.Context) (*stdouttrace.Exporter, error) {
-	// TODO: may have to change that
-	return stdouttrace.New(stdouttrace.WithPrettyPrint())
-}
+// NewTracerProvider returns a new provider for tracers. An application should
+// call this function only once, as per the documentation:
+// https://opentelemetry.io/docs/concepts/signals/traces/#tracer-provider
+func NewTracerProvider(serviceName string) *sdktrace.TracerProvider {
+	var (
+		err error
+		exp sdktrace.SpanExporter
+		res *resource.Resource
+	)
 
-func NewTraceProvider(exp sdktrace.SpanExporter) *sdktrace.TracerProvider {
-	log.Printf("Schema URL: %v", semconv.SchemaURL)
-
-	// Ensure default SDK resources and the required service name are set.
-	r, err := resource.Merge(
+	// Set the service name in the resource.
+	if res, err = resource.Merge(
 		resource.Default(),
 		resource.NewWithAttributes(
 			semconv.SchemaURL,
-			semconv.ServiceName("ExampleService"),
+			semconv.ServiceName(serviceName),
 		),
-	)
-	if err != nil {
-		log.Fatalf("Error merging resources: %v", err)
+	); err != nil {
+		log.Fatal(err)
+	}
+
+	// Export traces to stdout for simplicity.
+	if exp, err = stdouttrace.New(stdouttrace.WithPrettyPrint()); err != nil {
+		log.Fatal(err)
 	}
 
 	return sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exp),
-		sdktrace.WithResource(r),
+		sdktrace.WithResource(res),
 	)
 }
